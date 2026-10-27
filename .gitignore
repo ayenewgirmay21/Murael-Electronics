@@ -1,0 +1,17 @@
+﻿.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+*.bak
+*.backup
+*.before-*
+*.recovery-copy
+inspect_*.py
+patch_*.py
+data/*.db
+data/*.db-shm
+data/*.db-wal
+products/*
+!products/.gitkeep
