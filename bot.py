@@ -980,7 +980,16 @@ def main():
     if not ADMIN_USER_IDS:
         logger.warning("ADMIN_USER_IDS is empty. Admin features will be unavailable until configured.")
     init_db()
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(30)
+        .post_init(post_init)
+        .build()
+    )
 
     # Product creation conversation, initiated by an admin's inline button.
     admin_conv = ConversationHandler(
