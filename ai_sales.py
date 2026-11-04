@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -118,8 +119,19 @@ def _groq_chat(messages, model=None):
         method="POST",
     )
 
-    with urlopen(request, timeout=60) as response:
-        result = json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=60) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="replace")
+        logger.error(
+            "Groq API returned HTTP %s: %s",
+            error.code,
+            error_body[:1500],
+        )
+        raise RuntimeError(
+            f"Groq API HTTP {error.code}: {error_body[:500]}"
+        ) from error
 
     choices = result.get("choices", [])
 
