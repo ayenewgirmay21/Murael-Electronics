@@ -15,9 +15,17 @@ DB_PATH = Path(os.getenv("DATABASE_PATH", "data/murael.db"))
 if not DB_PATH.is_absolute():
     DB_PATH = ROOT / DB_PATH
 
-MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b").strip()
-AMHARIC_MODEL = os.getenv("OLLAMA_AMHARIC_MODEL", "gemma3:4b").strip()
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv(
+    "GROQ_MODEL",
+    "llama-3.3-70b-versatile"
+).strip()
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Use the same hosted model for English and Amharic.
+MODEL = GROQ_MODEL
+AMHARIC_MODEL = GROQ_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -85,28 +93,51 @@ def _fallback(language):
 )
 
 
-def _ollama_chat(messages, model=None):
-    """Send a chat request to the local Ollama service."""
+def _groq_chat(messages, model=None):
+    """Send a chat request to Groq's hosted AI service."""
+
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not configured.")
+
     payload = {
-        "model": model or MODEL,
+        "model": model or GROQ_MODEL,
         "messages": messages,
+        "temperature": 0.4,
+        "max_completion_tokens": 500,
         "stream": False,
-        "options": {"num_predict": 500},
     }
+
     request = Request(
-        OLLAMA_URL,
+        GROQ_URL,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "User-Agent": "MuraelElectronicsBot/1.0",
+        },
         method="POST",
     )
-    with urlopen(request, timeout=120) as response:
+
+    with urlopen(request, timeout=60) as response:
         result = json.loads(response.read().decode("utf-8"))
 
-    if not isinstance(result.get("message"), dict):
-        raise ValueError("Ollama returned no assistant message.")
-    return result
+    choices = result.get("choices", [])
 
+    if not choices:
+        raise ValueError("Groq returned no assistant response.")
 
+    content = (
+        choices[0].get("message", {}).get("content") or ""
+    ).strip()
+
+    if not content:
+        raise ValueError("Groq returned an empty assistant message.")
+
+    return {
+        "message": {
+            "content": content
+        }
+    }
 async def answer_customer(message, user_id, language="en"):
     """Answer a customer using current SQLite products and limited chat history."""
     language = "am" if language == "am" else "en"
@@ -200,8 +231,8 @@ async def answer_customer(message, user_id, language="en"):
                 f"\u12ad\u121d\u127d\u1275 {stock} \u1290\u12cd\u1362"
             )
 
-        # Do not send Amharic to a model that has produced unreliable text.
-        return _fallback("am")
+        # Send other Amharic questions to the hosted Groq model.
+        pass
 
     delivery_terms = ("delivery", "deliver", "shipping", "ship to", "home delivery")
     if any(term in message.casefold() for term in delivery_terms):
@@ -226,7 +257,7 @@ async def answer_customer(message, user_id, language="en"):
         messages.append({"role": "user", "content": customer_input})
         selected_model = AMHARIC_MODEL if language == "am" else MODEL
         response_data = await asyncio.to_thread(
-            _ollama_chat, messages, selected_model
+            _groq_chat, messages, selected_model
         )
         answer = (response_data.get("message", {}).get("content") or "").strip()
         if not answer:
